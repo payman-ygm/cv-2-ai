@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Analytics } from "@vercel/analytics/next"
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { 
   Upload, FileText, CheckCircle, AlertTriangle, XCircle, 

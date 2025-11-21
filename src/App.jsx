@@ -48,7 +48,7 @@ const realGeminiAnalysis = async (text, jobDesc) => {
   try {
     const genAI = new GoogleGenerativeAI(API_KEY);
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-1.5-flash-001",
+      model: "gemini-1.5-flash",
       systemInstruction: SYSTEM_PROMPT
     });
 

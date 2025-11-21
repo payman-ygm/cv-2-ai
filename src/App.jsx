@@ -42,14 +42,9 @@ OUTPUT FORMAT (JSON ONLY):
 `;
 
 // ==========================================
-// 🧠 REAL AI SERVICE (Gemini) - NO MOCK FALLBACK
+// 🧠 REAL AI SERVICE (Gemini)
 // ==========================================
 const realGeminiAnalysis = async (text, jobDesc) => {
-  // Check if API Key is available before proceeding
-  if (!API_KEY) {
-    throw new Error("API_KEY is missing. Cannot perform real analysis.");
-  }
-  
   try {
     const genAI = new GoogleGenerativeAI(API_KEY);
     const model = genAI.getGenerativeModel({ 
@@ -65,32 +60,38 @@ const realGeminiAnalysis = async (text, jobDesc) => {
       ${jobDesc || "General Software Engineering role"}
     `;
 
-    // Increased retry mechanism for network stability
-    let result;
-    for (let i = 0; i < 3; i++) {
-        try {
-            result = await model.generateContent(userPrompt);
-            break; // Success!
-        } catch (e) {
-            console.warn(`Attempt ${i + 1} failed. Retrying...`);
-            if (i === 2) throw e;
-            await new Promise(resolve => setTimeout(resolve, 2 ** i * 1000)); // Exponential backoff
-        }
-    }
-
+    const result = await model.generateContent(userPrompt);
     const response = await result.response;
     const textResponse = response.text();
 
     // Clean up the response to ensure it's pure JSON (remove markdown code blocks)
-    // This is crucial for models that might wrap the JSON in ```json...```
     const jsonString = textResponse.replace(/```json|```/g, '').trim();
     return JSON.parse(jsonString);
 
   } catch (error) {
     console.error("Gemini API Error:", error);
-    // Throw the error so handleAnalyze can catch it and display a proper message
-    throw new Error(`AI Analysis Failed: ${error.message}`);
+    alert("API Error: Check console for details. Falling back to mock data.");
   }
+};
+
+// ==========================================
+// 🎭 MOCK AI SERVICE (Free Testing)
+// ==========================================
+const mockAIAnalysis = (text, jobDesc) => {
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      resolve({
+        summary: "This candidate shows strong technical potential but lacks quantitative evidence. The structure is ATS-friendly, but the language is too passive. (MOCK DATA - Add API Key to see real results)",
+        bulletPoints: [
+          { original: "Worked on a React project for a client.", improved: "Architected a scalable React application for a Fortune 500 client, reducing page load time by 40%." },
+          { original: "Responsible for managing a team.", improved: "Spearheaded a cross-functional team of 10 engineers, delivering the Q4 roadmap 2 weeks ahead of schedule." }
+        ],
+        missingKeywords: jobDesc ? ['Kubernetes', 'CI/CD', 'System Design'] : ['Leadership', 'Optimization'],
+        softSkills: ['Communication', 'Problem Solving'],
+        score: 72
+      });
+    }, 1500);
+  });
 };
 
 // ==========================================
@@ -107,15 +108,14 @@ const calculateStats = (text) => {
   const impactScore = Math.min(100, Math.round((quantifiers.length / (sentences.length || 1)) * 100 * 1.5));
 
   // Action Verbs
-  const strongVerbs = ['spearheaded', 'orchestrated', 'developed', 'engineered', 'implemented', 'generated', 'increased', 'reduced', 'launched', 'architected', 'delivered', 'improved', 'managed', 'created'];
-  const weakVerbs = ['helped', 'worked', 'responsible', 'assisted', 'participated', 'was'];
+  const strongVerbs = ['spearheaded', 'orchestrated', 'developed', 'engineered', 'implemented', 'generated', 'increased', 'reduced', 'launched'];
+  const weakVerbs = ['helped', 'worked', 'responsible', 'assisted', 'participated'];
   
   let strongCount = 0;
   let weakCount = 0;
   words.forEach(w => {
-    const cleanWord = w.toLowerCase().replace(/[^a-z]/g, '');
-    if (strongVerbs.includes(cleanWord)) strongCount++;
-    if (weakVerbs.includes(cleanWord)) weakCount++;
+    if (strongVerbs.includes(w.toLowerCase())) strongCount++;
+    if (weakVerbs.includes(w.toLowerCase())) weakCount++;
   });
   
   const verbScore = Math.min(100, Math.round((strongCount / (strongCount + weakCount + 1)) * 100));
@@ -138,36 +138,26 @@ const App = () => {
   const [aiResult, setAiResult] = useState(null);
   const [isPro, setIsPro] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
-  const [error, setError] = useState(null); // New state for error handling
 
   const handleAnalyze = async () => {
     if (resumeText.length < 50) return alert("Please enter a longer resume text.");
-    
-    // Reset previous state
-    setError(null);
-    setAiResult(null);
-    setStep(2); // Move to loading state
+    setStep(2);
     
     // 1. Local Stats (Free/Instant)
     const computedStats = calculateStats(resumeText);
     setStats(computedStats);
 
-    // 2. AI Analysis (Real)
-    if (!API_KEY) {
-      setError("API Key is missing. Please set VITE_GEMINI_API_KEY.");
-      setStep(1); // Go back to input screen on fatal config error
-      return;
+    // 2. AI Analysis (Real vs Mock)
+    let aiData;
+    if (API_KEY) {
+      aiData = await realGeminiAnalysis(resumeText, jobDesc);
+    } else {
+      console.log("No API Key found. Using Mock Service.");
+      aiData = await mockAIAnalysis(resumeText, jobDesc);
     }
     
-    try {
-      const aiData = await realGeminiAnalysis(resumeText, jobDesc);
-      setAiResult(aiData);
-      setStep(3); // Move to result state
-    } catch (e) {
-      console.error(e.message);
-      setError("Analysis failed. The API likely returned a non-JSON error page (e.g., key restriction or 404/403). Check your console and API key restrictions in Google Cloud Console.");
-      setStep(1); // Go back to input screen on API failure
-    }
+    setAiResult(aiData);
+    setStep(3);
   };
 
   const reset = () => {
@@ -176,7 +166,6 @@ const App = () => {
     setJobDesc('');
     setStats(null);
     setAiResult(null);
-    setError(null);
   };
 
   // --- UI COMPONENTS ---
@@ -282,16 +271,6 @@ const App = () => {
               Get professional-level critique, ATS compatibility checks, and AI-powered improvement suggestions in seconds.
             </p>
           </div>
-          
-          {error && (
-             <div className="w-full bg-rose-100 border border-rose-300 text-rose-800 p-4 rounded-xl mb-6 flex items-start gap-3">
-               <AlertTriangle size={20} className="mt-0.5 flex-shrink-0" />
-               <div className='flex-1'>
-                  <p className="font-semibold">Error:</p>
-                  <p className="text-sm">{error}</p>
-               </div>
-             </div>
-          )}
 
           <div className="w-full bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
             <div className="flex border-b border-slate-100">
@@ -323,19 +302,14 @@ const App = () => {
               </div>
               <button 
                 onClick={handleAnalyze}
-                disabled={!API_KEY}
-                className={`w-full py-4 text-white font-bold rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all transform active:scale-95 ${
-                  API_KEY 
-                    ? 'bg-slate-900 hover:bg-slate-800' 
-                    : 'bg-slate-400 cursor-not-allowed'
-                }`}
+                className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all transform active:scale-95"
               >
                 <Search size={20} />
-                {API_KEY ? 'Analyze My Resume' : 'API Key Required to Run'}
+                Analyze My Resume
               </button>
               {!API_KEY && (
-                <p className="text-center text-xs text-rose-500 italic mt-2">
-                  Please configure VITE_GEMINI_API_KEY environment variable.
+                <p className="text-center text-xs text-slate-400 italic mt-2">
+                  Running in Demo Mode (Mock Data). Add API Key to enable AI.
                 </p>
               )}
             </div>
@@ -381,7 +355,6 @@ const App = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 pb-12">
-      <Analytics />
       {showUpgradeModal && <UpgradeModal />}
       
       <nav className="bg-white border-b border-slate-200 sticky top-0 z-30">
@@ -524,7 +497,7 @@ const App = () => {
                    </span>
                  ))}
                  <span className="px-3 py-1 border border-dashed border-slate-300 text-slate-400 rounded-full text-sm flex items-center">
-                   {aiResult?.missingKeywords?.length < 5 ? `+ ${5 - (aiResult?.missingKeywords?.length || 0)} more detected` : ''}
+                   + 4 more detected
                  </span>
                </div>
             </div>
@@ -547,18 +520,15 @@ const App = () => {
                <ul className="space-y-3">
                  <li className="flex items-center justify-between text-sm">
                    <span className="text-slate-600">Python Data Analysis</span>
-                   {/* Placeholder link replaced with a generic but non-empty link */}
-                   <a href="https://example.com/python-course" target="_blank" rel="noopener noreferrer" className="text-indigo-600 font-medium text-xs hover:underline">View Course</a>
+                   <a href="#" className="text-indigo-600 font-medium text-xs hover:underline">View Course</a>
                  </li>
                  <li className="flex items-center justify-between text-sm">
                    <span className="text-slate-600">AWS Certification</span>
-                   {/* Placeholder link replaced with a generic but non-empty link */}
-                   <a href="https://example.com/aws-course" target="_blank" rel="noopener noreferrer" className="text-indigo-600 font-medium text-xs hover:underline">View Course</a>
+                   <a href="#" className="text-indigo-600 font-medium text-xs hover:underline">View Course</a>
                  </li>
                  <li className="flex items-center justify-between text-sm">
                    <span className="text-slate-600">System Design</span>
-                   {/* Placeholder link replaced with a generic but non-empty link */}
-                   <a href="https://example.com/system-design-course" target="_blank" rel="noopener noreferrer" className="text-indigo-600 font-medium text-xs hover:underline">View Course</a>
+                   <a href="#" className="text-indigo-600 font-medium text-xs hover:underline">View Course</a>
                  </li>
                </ul>
                <div className="mt-4 pt-4 border-t border-slate-100">

@@ -42,35 +42,60 @@ OUTPUT FORMAT (JSON ONLY):
 `;
 
 // ==========================================
-// 🧠 REAL AI SERVICE (Gemini)
+// 🧠 REAL AI SERVICE (Gemini) - CORRECTED VERSION
 // ==========================================
 const realGeminiAnalysis = async (text, jobDesc) => {
   try {
+    console.log("Using API Key:", API_KEY ? "Present" : "Missing");
+    
     const genAI = new GoogleGenerativeAI(API_KEY);
+    
+    // Correct model configuration
     const model = genAI.getGenerativeModel({ 
       model: "gemini-1.5-flash",
-      systemInstruction: SYSTEM_PROMPT
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: 1000,
+      }
     });
 
-    const userPrompt = `
-      RESUME TEXT: 
-      ${text}
+    // Combine system prompt with user input
+    const fullPrompt = `
+SYSTEM INSTRUCTIONS:
+${SYSTEM_PROMPT}
 
-      JOB DESCRIPTION: 
-      ${jobDesc || "General Software Engineering role"}
-    `;
+USER INPUT:
+Resume Text: ${text}
+Job Description: ${jobDesc || "General Software Engineering role"}
 
-    const result = await model.generateContent(userPrompt);
+Please analyze the resume above and provide your response in the exact JSON format specified.
+`;
+
+    console.log("Sending request to Gemini API...");
+    
+    const result = await model.generateContent(fullPrompt);
     const response = await result.response;
     const textResponse = response.text();
 
-    // Clean up the response to ensure it's pure JSON (remove markdown code blocks)
+    console.log("Raw API Response:", textResponse);
+
+    // Clean up the response to ensure it's pure JSON
     const jsonString = textResponse.replace(/```json|```/g, '').trim();
-    return JSON.parse(jsonString);
+    const parsedResult = JSON.parse(jsonString);
+    
+    console.log("Parsed Result:", parsedResult);
+    return parsedResult;
 
   } catch (error) {
-    console.error("Gemini API Error:", error);
-    alert("API Error: Check console for details. Falling back to mock data.");
+    console.error("Gemini API Error Details:", {
+      message: error.message,
+      name: error.name,
+      stack: error.stack
+    });
+    
+    // Fall back to mock data with a warning
+    alert("API Error: " + error.message + ". Falling back to mock data.");
+    return await mockAIAnalysis(text, jobDesc);
   }
 };
 
@@ -84,10 +109,11 @@ const mockAIAnalysis = (text, jobDesc) => {
         summary: "This candidate shows strong technical potential but lacks quantitative evidence. The structure is ATS-friendly, but the language is too passive. (MOCK DATA - Add API Key to see real results)",
         bulletPoints: [
           { original: "Worked on a React project for a client.", improved: "Architected a scalable React application for a Fortune 500 client, reducing page load time by 40%." },
-          { original: "Responsible for managing a team.", improved: "Spearheaded a cross-functional team of 10 engineers, delivering the Q4 roadmap 2 weeks ahead of schedule." }
+          { original: "Responsible for managing a team.", improved: "Spearheaded a cross-functional team of 10 engineers, delivering the Q4 roadmap 2 weeks ahead of schedule." },
+          { original: "Helped with customer support.", improved: "Resolved 95% of customer issues within 24 hours, improving customer satisfaction scores by 30%." }
         ],
-        missingKeywords: jobDesc ? ['Kubernetes', 'CI/CD', 'System Design'] : ['Leadership', 'Optimization'],
-        softSkills: ['Communication', 'Problem Solving'],
+        missingKeywords: jobDesc ? ['Kubernetes', 'CI/CD', 'System Design'] : ['Leadership', 'Optimization', 'Project Management'],
+        softSkills: ['Communication', 'Problem Solving', 'Team Collaboration'],
         score: 72
       });
     }, 1500);
@@ -108,8 +134,8 @@ const calculateStats = (text) => {
   const impactScore = Math.min(100, Math.round((quantifiers.length / (sentences.length || 1)) * 100 * 1.5));
 
   // Action Verbs
-  const strongVerbs = ['spearheaded', 'orchestrated', 'developed', 'engineered', 'implemented', 'generated', 'increased', 'reduced', 'launched'];
-  const weakVerbs = ['helped', 'worked', 'responsible', 'assisted', 'participated'];
+  const strongVerbs = ['spearheaded', 'orchestrated', 'developed', 'engineered', 'implemented', 'generated', 'increased', 'reduced', 'launched', 'optimized', 'automated'];
+  const weakVerbs = ['helped', 'worked', 'responsible', 'assisted', 'participated', 'involved', 'contributed'];
   
   let strongCount = 0;
   let weakCount = 0;
@@ -138,26 +164,43 @@ const App = () => {
   const [aiResult, setAiResult] = useState(null);
   const [isPro, setIsPro] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   const handleAnalyze = async () => {
-    if (resumeText.length < 50) return alert("Please enter a longer resume text.");
+    if (resumeText.length < 50) {
+      alert("Please enter a longer resume text (minimum 50 characters).");
+      return;
+    }
+    
     setStep(2);
+    setIsAnalyzing(true);
     
     // 1. Local Stats (Free/Instant)
     const computedStats = calculateStats(resumeText);
     setStats(computedStats);
 
-    // 2. AI Analysis (Real vs Mock)
-    let aiData;
-    if (API_KEY) {
-      aiData = await realGeminiAnalysis(resumeText, jobDesc);
-    } else {
-      console.log("No API Key found. Using Mock Service.");
-      aiData = await mockAIAnalysis(resumeText, jobDesc);
+    try {
+      // 2. AI Analysis (Real vs Mock)
+      let aiData;
+      if (API_KEY) {
+        console.log("Attempting real Gemini analysis...");
+        aiData = await realGeminiAnalysis(resumeText, jobDesc);
+      } else {
+        console.log("No API Key found. Using Mock Service.");
+        aiData = await mockAIAnalysis(resumeText, jobDesc);
+      }
+      
+      setAiResult(aiData);
+      setStep(3);
+    } catch (error) {
+      console.error("Analysis failed:", error);
+      // Ensure we still show results even if there's an error
+      const mockData = await mockAIAnalysis(resumeText, jobDesc);
+      setAiResult(mockData);
+      setStep(3);
+    } finally {
+      setIsAnalyzing(false);
     }
-    
-    setAiResult(aiData);
-    setStep(3);
   };
 
   const reset = () => {
@@ -166,6 +209,24 @@ const App = () => {
     setJobDesc('');
     setStats(null);
     setAiResult(null);
+    setIsAnalyzing(false);
+  };
+
+  // Temporary API test function
+  const testAPI = async () => {
+    try {
+      const genAI = new GoogleGenerativeAI(API_KEY);
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+      const result = await model.generateContent("Hello, respond with 'OK' if working");
+      const response = await result.response;
+      console.log('API Test Successful:', response.text());
+      alert('API Test Successful: ' + response.text());
+      return true;
+    } catch (error) {
+      console.error('API Test Failed:', error.message);
+      alert('API Test Failed: ' + error.message);
+      return false;
+    }
   };
 
   // --- UI COMPONENTS ---
@@ -249,6 +310,20 @@ const App = () => {
     </div>
   );
 
+  // API Debug Component
+  const APIDebug = () => (
+    <div className="fixed bottom-4 right-4 bg-yellow-100 border border-yellow-400 p-3 rounded text-xs max-w-xs">
+      <div className="font-semibold mb-1">API Debug</div>
+      <div>API Key: {API_KEY ? "✅ Present" : "❌ Missing"}</div>
+      <button 
+        onClick={testAPI}
+        className="mt-1 bg-blue-500 text-white px-2 py-1 rounded text-xs w-full"
+      >
+        Test API Connection
+      </button>
+    </div>
+  );
+
   if (step === 1) {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col">
@@ -290,6 +365,9 @@ const App = () => {
                   value={resumeText}
                   onChange={(e) => setResumeText(e.target.value)}
                 ></textarea>
+                <div className="text-xs text-slate-400 mt-1">
+                  {resumeText.length}/50 characters minimum
+                </div>
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">Target Job Description (Optional)</label>
@@ -302,14 +380,15 @@ const App = () => {
               </div>
               <button 
                 onClick={handleAnalyze}
-                className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all transform active:scale-95"
+                disabled={isAnalyzing || resumeText.length < 50}
+                className="w-full py-4 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-400 text-white font-bold rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all transform active:scale-95 disabled:transform-none"
               >
                 <Search size={20} />
-                Analyze My Resume
+                {isAnalyzing ? "Analyzing..." : "Analyze My Resume"}
               </button>
               {!API_KEY && (
                 <p className="text-center text-xs text-slate-400 italic mt-2">
-                  Running in Demo Mode (Mock Data). Add API Key to enable AI.
+                  Running in Demo Mode (Mock Data). Add API Key to enable real AI analysis.
                 </p>
               )}
             </div>
@@ -331,6 +410,8 @@ const App = () => {
             ))}
           </div>
         </main>
+        {API_KEY && <APIDebug />}
+        <Analytics />
       </div>
     );
   }
@@ -347,8 +428,14 @@ const App = () => {
           <div className="text-center space-y-2">
             <h2 className="text-2xl font-bold text-slate-800">Analyzing Resume...</h2>
             <p className="text-slate-500">Checking ATS compatibility, strong verbs, and impact metrics.</p>
+            {API_KEY ? (
+              <p className="text-sm text-green-600">Using real AI analysis</p>
+            ) : (
+              <p className="text-sm text-amber-600">Using demo data</p>
+            )}
           </div>
         </div>
+        <Analytics />
       </div>
     );
   }
@@ -385,16 +472,16 @@ const App = () => {
             <div>
               <h2 className="text-slate-300 font-medium mb-1">Overall Quality</h2>
               <div className="text-6xl font-bold tracking-tighter mb-2 flex items-baseline gap-2">
-                {aiResult?.score}<span className="text-2xl text-slate-400 font-normal">/100</span>
+                {aiResult?.score || 0}<span className="text-2xl text-slate-400 font-normal">/100</span>
               </div>
               <div className="inline-flex items-center gap-1.5 bg-white/10 px-3 py-1 rounded-full text-sm backdrop-blur-sm">
-                {aiResult?.score > 75 ? <CheckCircle size={14} className="text-green-400"/> : <AlertTriangle size={14} className="text-amber-400"/>}
-                {aiResult?.score > 75 ? "Top 20% of Candidates" : "Needs Improvement"}
+                {(aiResult?.score || 0) > 75 ? <CheckCircle size={14} className="text-green-400"/> : <AlertTriangle size={14} className="text-amber-400"/>}
+                {(aiResult?.score || 0) > 75 ? "Top 20% of Candidates" : "Needs Improvement"}
               </div>
             </div>
             <div className="space-y-3 mt-8">
               <p className="text-sm text-slate-300 leading-relaxed opacity-90">
-                "{aiResult?.summary}"
+                "{aiResult?.summary || "No analysis available."}"
               </p>
             </div>
           </div>
@@ -483,6 +570,11 @@ const App = () => {
                     </div>
                   </div>
                 ))}
+                {(!aiResult?.bulletPoints || aiResult.bulletPoints.length === 0) && (
+                  <div className="p-6 text-center text-slate-400">
+                    No improvement suggestions available.
+                  </div>
+                )}
               </div>
             </div>
             
@@ -496,9 +588,9 @@ const App = () => {
                      {kw} <span className="opacity-50 text-xs">+5 pts</span>
                    </span>
                  ))}
-                 <span className="px-3 py-1 border border-dashed border-slate-300 text-slate-400 rounded-full text-sm flex items-center">
-                   + 4 more detected
-                 </span>
+                 {(!aiResult?.missingKeywords || aiResult.missingKeywords.length === 0) && (
+                   <span className="text-slate-400 text-sm">No missing keywords detected.</span>
+                 )}
                </div>
             </div>
           </div>
@@ -538,6 +630,8 @@ const App = () => {
           </div>
         </div>
       </div>
+      {API_KEY && <APIDebug />}
+      <Analytics />
     </div>
   );
 };
